@@ -1,128 +1,69 @@
-"""
-Routes and views for the flask application.
-"""
+# Article CMS (FlaskWebProject)
 
-from datetime import datetime
-from flask import render_template, flash, redirect, request, session, url_for
-from werkzeug.urls import url_parse
-from config import Config
-from FlaskWebProject import app, db
-from FlaskWebProject.forms import LoginForm, PostForm
-from flask_login import current_user, login_user, logout_user, login_required
-from FlaskWebProject.models import User, Post
-import msal
-import uuid
+This project is a Python web application built using Flask. The user can log in and out and create/edit articles. An article consists of a title, author, and body of text stored in an Azure SQL Server along with an image that is stored in Azure Blob Storage. You will also implement OAuth2 with Sign in with Microsoft using the `msal` library, along with app logging.
 
-imageSourceUrl = 'https://'+ app.config['BLOB_ACCOUNT']  + '.blob.core.windows.net/' + app.config['BLOB_CONTAINER']  + '/'
+## Log In Credentials for FlaskWebProject
 
-@app.route('/')
-@app.route('/home')
-@login_required
-def home():
-    user = User.query.filter_by(username=current_user.username).first_or_404()
-    posts = Post.query.all()
-    return render_template(
-        'index.html',
-        title='Home Page',
-        posts=posts
-    )
+- Username: admin
+- Password: pass
 
-@app.route('/new_post', methods=['GET', 'POST'])
-@login_required
-def new_post():
-    form = PostForm(request.form)
-    if form.validate_on_submit():
-        post = Post()
-        post.save_changes(form, request.files['image_path'], current_user.id, new=True)
-        return redirect(url_for('home'))
-    return render_template(
-        'post.html',
-        title='Create Post',
-        imageSource=imageSourceUrl,
-        form=form
-    )
+Or, once the MS Login button is implemented, it will automatically log into the `admin` account.
 
+## Project Instructions (For Student)
 
-@app.route('/post/<int:id>', methods=['GET', 'POST'])
-@login_required
-def post(id):
-    post = Post.query.get(int(id))
-    form = PostForm(formdata=request.form, obj=post)
-    if form.validate_on_submit():
-        post.save_changes(form, request.files['image_path'], current_user.id)
-        return redirect(url_for('home'))
-    return render_template(
-        'post.html',
-        title='Edit Post',
-        imageSource=imageSourceUrl,
-        form=form
-    )
+You are expected to do the following to complete this project:
+1. Create a Resource Group in Azure.
+2. Create an SQL Database in Azure that contains a user table, an article table, and data in each table (populated with the scripts provided in the SQL Scripts folder).
+    - Provide a screenshot of the populated tables as detailed further below.
+3. Create a Storage Container in Azure for `images` to be stored in a container.
+    - Provide a screenshot of the storage endpoint URL as detailed further below.
+4. Add functionality to the Sign In With Microsoft button. 
+    - This will require completing TODOs in `views.py` with the `msal` library, along with appropriate registration in Azure Active Directory.
+5. Choose to use either a VM or App Service to deploy the FlaskWebProject to Azure. Complete the analysis template in `WRITEUP.md` (or include in the README) to compare the two options, as well as detail your reasoning behind choosing one or the other. Once you have made your choice, go through with deployment.
+6. Add logging for whether users successfully or unsuccessfully logged in.
+    - This will require completing TODOs in `__init__.py`, as well as adding logging where desired in `views.py`.
+7. To prove that the application in on Azure and working, go to the URL of your deployed app, log in using the credentials in this README, click the Create button, and create an article with the following data:
+	- Title: "Hello World!"
+	- Author: "Jane Doe"
+	- Body: "My name is Jane Doe and this is my first article!"
+	- Upload an image of your choice. Must be either a .png or .jpg.
+   After saving, click back on the article you created and provide a screenshot proving that it was created successfully. Please also make sure the URL is present in the screenshot.
+8. Log into the Azure Portal, go to your Resource Group, and provide a screenshot including all of the resources that were created to complete this project. (see sample screenshot in "example_images" folder)
+9. Take a screenshot of the Redirect URIs entered for your registered app, related to the MS Login button.
+10. Take a screenshot of your logs (can be from the Log stream in Azure) showing logging from an attempt to sign in with an invalid login, as well as a valid login.
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if current_user.is_authenticated:
-        return redirect(url_for('home'))
-    form = LoginForm()
-    if form.validate_on_submit():
-        user = User.query.filter_by(username=form.username.data).first()
-        if user is None or not user.check_password(form.password.data):
-            flash('Invalid username or password')
-            return redirect(url_for('login'))
-        login_user(user, remember=form.remember_me.data)
-        next_page = request.args.get('next')
-        if not next_page or url_parse(next_page).netloc != '':
-            next_page = url_for('home')
-        return redirect(next_page)
-    session["state"] = str(uuid.uuid4())
-    auth_url = _build_auth_url(scopes=Config.SCOPE, state=session["state"])
-    return render_template('login.html', title='Sign In', form=form, auth_url=auth_url)
+## example_images Folder
 
-@app.route(Config.REDIRECT_PATH)  # Its absolute URL must match your app's redirect_uri set in AAD
-def authorized():
-    if request.args.get('state') != session.get("state"):
-        return redirect(url_for("home"))  # No-OP. Goes back to Index page
-    if "error" in request.args:  # Authentication/Authorization failure
-        return render_template("auth_error.html", result=request.args)
-    if request.args.get('code'):
-        cache = _load_cache()
-        # TODO: Acquire a token from a built msal app, along with the appropriate redirect URI
-        result = None
-        if "error" in result:
-            return render_template("auth_error.html", result=result)
-        session["user"] = result.get("id_token_claims")
-        # Note: In a real app, we'd use the 'name' property from session["user"] below
-        # Here, we'll use the admin username for anyone who is authenticated by MS
-        user = User.query.filter_by(username="admin").first()
-        login_user(user)
-        _save_cache(cache)
-    return redirect(url_for('home'))
+This folder contains sample screenshots that students are required to submit in order to prove they completed various tasks throughout the project.
 
-@app.route('/logout')
-def logout():
-    logout_user()
-    if session.get("user"): # Used MS Login
-        # Wipe out user and its token cache from session
-        session.clear()
-        # Also logout from your tenant's web session
-        return redirect(
-            Config.AUTHORITY + "/oauth2/v2.0/logout" +
-            "?post_logout_redirect_uri=" + url_for("login", _external=True))
+1. article-cms-solution.png is a screenshot from running the FlaskWebProject on Azure and prove that the student was able to create a new entry. The Title, Author, and Body fields must be populated to prove that the data is being retrieved from the Azure SQL Database while the image on the right proves that an image was uploaded and pulled from Azure Blob Storage.
+2. azure-portal-resource-group.png is a screenshot from the Azure Portal showing all of the contents of the Resource Group the student needs to create. The resource group must (at least) contain the following:
+	- Storage Account
+	- SQL Server
+	- SQL Database
+	- Resources related to deploying the app
+3. sql-storage-solution.png is a screenshot showing the created tables and one query of data from the initial scripts.
+4. blob-solution.png is a screenshot showing an example of blob endpoints for where images are sent for storage.
+5. uri-redirects-solution.png is a screenshot of the redirect URIs related to Microsoft authentication.
+6. log-solution.png is a screenshot showing one potential form of logging with an "Invalid login attempt" and "admin logged in successfully", taken from the app's Log stream. You can customize your log messages as you see fit for these situations.
 
-    return redirect(url_for('login'))
+## Dependencies
 
-def _load_cache():
-    # TODO: Load the cache from `msal`, if it exists
-    cache = None
-    return cache
+1. A free Azure account
+2. A GitHub account
+3. Python 3.12
+4. Visual Studio 2019 Community Edition (Free)
+5. The latest Azure CLI (helpful; not required - all actions can be done in the portal)
 
-def _save_cache(cache):
-    # TODO: Save the cache, if it has changed
-    pass
+All Python dependencies are stored in the requirements.txt file. To install them, using Visual Studio 2019 Community Edition:
+1. In the Solution Explorer, expand "Python Environments"
+2. Right-click on "Python 3.12 (64-bit) (global default)" and select "Install from requirements.txt"
 
-def _build_msal_app(cache=None, authority=None):
-    # TODO: Return a ConfidentialClientApplication
-    return None
+## Troubleshooting
 
-def _build_auth_url(authority=None, scopes=None, state=None):
-    # TODO: Return the full Auth Request URL with appropriate Redirect URI
-    return None
+- Mac users may need to install `unixodbc` as well as related drivers as shown below:
+    ```bash
+    brew install unixodbc
+    ```
+- Check [here](https://docs.microsoft.com/en-us/sql/connect/odbc/linux-mac/install-microsoft-odbc-driver-sql-server-macos?view=sql-server-ver15) to add SQL Server drivers for Mac.
+- If you get an error when installing the dependencies `AttributeError: module 'collections' has no attribute 'MutableMapping'`, verify that you are on Python version 3.12 as there are known incompatibility issues with 3.10
