@@ -5,3 +5,4 @@ azure-storage-blob==12.8.1
 requests==2.22.0
 gunicorn==20.1.0
 SQLAlchemy==1.4.46
+# redeploy
